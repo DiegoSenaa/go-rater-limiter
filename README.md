@@ -31,7 +31,7 @@ A limitação de requisições é aplicada com base no endereço IP ou no token 
 Execute os testes com o comando:
 
 ```sh
-docker-compose run --rm --no-deps --build --no-cache app go test ./tests
+docker-compose run --rm --no-deps --build app go test ./tests
 ```
 
 ### Estrutura do Projeto
@@ -41,10 +41,17 @@ docker-compose run --rm --no-deps --build --no-cache app go test ./tests
 
 `internal/ratelimiter/ratelimiter.go`: Lógica do rate limiter.
 
-`internal/redisclient/redisclient.go`: Inicialização e configuração do cliente Redis.
+`internal/storage/storage.go`: Interface e implementação das estratégias de persistência.
+
+`internal/storage/mock_storage.go`: Implementação mock da persistência.
+
+`internal/storage/redis_storage.go`: Implementação da persistência usando Redis.
 
 `Dockerfile`: Dockerfile para a aplicação.
 
 `docker-compose.yml`: Configuração do Docker Compose para Redis e a aplicação.
 
 `tests/middleware_test.go`: Testes automatizados.
+
+
+* Obs: Foi adicionado a strategy conforme foi apontado na correção da atividade.

@@ -3,33 +3,48 @@ package ratelimiter
 import (
 	"fmt"
 	"strconv"
-	"time"
 
-	"github.com/DiegoSenaa/go-rater-limiter/internal/redisclient"
+	"github.com/DiegoSenaa/go-rater-limiter/internal/storage"
 	"github.com/go-redis/redis/v8"
 )
 
-func AllowRequest(identifier, idType string) bool {
+type RateLimiter struct {
+	Storage        storage.Storage
+	RateLimitIP    int
+	RateLimitToken int
+}
+
+func NewRateLimiter(storage storage.Storage, rateLimitIP, rateLimitToken int) *RateLimiter {
+	return &RateLimiter{
+		Storage:        storage,
+		RateLimitIP:    rateLimitIP,
+		RateLimitToken: rateLimitToken,
+	}
+}
+
+func (r *RateLimiter) AllowRequest(identifier, idType string) bool {
 	var limit int
 	if idType == "token" {
-		limit = redisclient.RateLimitToken
+		limit = r.RateLimitToken
 	} else {
-		limit = redisclient.RateLimitIP
+		limit = r.RateLimitIP
 	}
 
 	key := fmt.Sprintf("rate_limiter:%s:%s", idType, identifier)
-	val, err := redisclient.RedisClient.Get(redisclient.Ctx, key).Result()
+	val, err := r.Storage.Get(key)
+
+	if err != nil && err != redis.Nil {
+		fmt.Println("Error getting value from storage:", err)
+		return false
+	}
 
 	if err == redis.Nil {
 		fmt.Printf("Setting initial value for key: %s\n", key)
-		err = redisclient.RedisClient.Set(redisclient.Ctx, key, "1", 10*time.Second).Err()
+		err = r.Storage.Set(key, "1", 10)
 		if err != nil {
-			fmt.Println("Error setting value in Redis:", err)
+			fmt.Println("Error setting value in storage:", err)
 		}
 		return true
-	} else if err != nil {
-		fmt.Println("Error getting value from Redis:", err)
-		return false
 	}
 
 	requests, _ := strconv.Atoi(val)
@@ -40,9 +55,9 @@ func AllowRequest(identifier, idType string) bool {
 		return false
 	}
 
-	err = redisclient.RedisClient.Incr(redisclient.Ctx, key).Err()
+	err = r.Storage.Incr(key)
 	if err != nil {
-		fmt.Println("Error incrementing value in Redis:", err)
+		fmt.Println("Error incrementing value in storage:", err)
 	}
 	return true
 }

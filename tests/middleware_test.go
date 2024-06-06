@@ -9,7 +9,8 @@ import (
 	"time"
 
 	"github.com/DiegoSenaa/go-rater-limiter/internal/middleware"
-	"github.com/DiegoSenaa/go-rater-limiter/internal/redisclient"
+	"github.com/DiegoSenaa/go-rater-limiter/internal/ratelimiter"
+	"github.com/DiegoSenaa/go-rater-limiter/internal/storage"
 	"github.com/go-chi/chi/v5"
 	"github.com/stretchr/testify/assert"
 )
@@ -22,10 +23,6 @@ func TestMain(m *testing.M) {
 	os.Setenv("REDIS_ADDR", "redis:6379")
 	os.Setenv("REDIS_PASSWORD", "")
 
-	// Inicializando o cliente Redis
-	fmt.Println("Inicializando o cliente Redis")
-	redisclient.InitRedisClient()
-
 	// Executando os testes
 	code := m.Run()
 
@@ -33,9 +30,9 @@ func TestMain(m *testing.M) {
 	os.Exit(code)
 }
 
-func setupRouter() *chi.Mux {
+func setupRouter(rl *ratelimiter.RateLimiter) *chi.Mux {
 	r := chi.NewRouter()
-	r.Use(middleware.RateLimitMiddleware)
+	r.Use(middleware.RateLimitMiddleware(rl))
 	r.Get("/", func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 		w.Write([]byte("Hello, world!"))
@@ -43,17 +40,19 @@ func setupRouter() *chi.Mux {
 	return r
 }
 
-func clearRedis() {
-	fmt.Println("Limpando o Redis")
-	err := redisclient.RedisClient.FlushDB(redisclient.Ctx).Err()
+func clearStorage(s storage.Storage) {
+	fmt.Println("Limpando o Storage")
+	err := s.Clear()
 	if err != nil {
-		fmt.Println("Error clearing Redis:", err)
+		fmt.Println("Error clearing storage:", err)
 	}
 }
 
 func TestRateLimitByIP(t *testing.T) {
-	clearRedis() // Limpar Redis antes de cada teste
-	r := setupRouter()
+	mockStorage := storage.NewMockStorage()
+	rateLimiter := ratelimiter.NewRateLimiter(mockStorage, 5, 10)
+	clearStorage(mockStorage)
+	r := setupRouter(rateLimiter)
 
 	for i := 0; i < 5; i++ {
 		fmt.Printf("Enviando requisição %d para o IP 192.168.1.1\n", i+1)
@@ -63,6 +62,7 @@ func TestRateLimitByIP(t *testing.T) {
 
 		r.ServeHTTP(rr, req)
 
+		fmt.Printf("Requisição %d retornou status %d\n", i+1, rr.Code)
 		assert.Equal(t, http.StatusOK, rr.Code, "Request should be allowed")
 	}
 
@@ -74,12 +74,15 @@ func TestRateLimitByIP(t *testing.T) {
 
 	r.ServeHTTP(rr, req)
 
+	fmt.Printf("Requisição que excede o limite retornou status %d\n", rr.Code)
 	assert.Equal(t, http.StatusTooManyRequests, rr.Code, "Request should be rate limited")
 }
 
 func TestRateLimitByToken(t *testing.T) {
-	clearRedis() // Limpar Redis antes de cada teste
-	r := setupRouter()
+	mockStorage := storage.NewMockStorage()
+	rateLimiter := ratelimiter.NewRateLimiter(mockStorage, 5, 10)
+	clearStorage(mockStorage)
+	r := setupRouter(rateLimiter)
 
 	token := "abc123"
 
@@ -91,6 +94,7 @@ func TestRateLimitByToken(t *testing.T) {
 
 		r.ServeHTTP(rr, req)
 
+		fmt.Printf("Requisição %d retornou status %d\n", i+1, rr.Code)
 		assert.Equal(t, http.StatusOK, rr.Code, "Request should be allowed")
 	}
 
@@ -102,12 +106,15 @@ func TestRateLimitByToken(t *testing.T) {
 
 	r.ServeHTTP(rr, req)
 
+	fmt.Printf("Requisição que excede o limite retornou status %d\n", rr.Code)
 	assert.Equal(t, http.StatusTooManyRequests, rr.Code, "Request should be rate limited")
 }
 
 func TestRateLimitReset(t *testing.T) {
-	clearRedis() // Limpar Redis antes de cada teste
-	r := setupRouter()
+	mockStorage := storage.NewMockStorage()
+	rateLimiter := ratelimiter.NewRateLimiter(mockStorage, 5, 10)
+	clearStorage(mockStorage)
+	r := setupRouter(rateLimiter)
 
 	clientIP := "192.168.1.2"
 
@@ -119,6 +126,7 @@ func TestRateLimitReset(t *testing.T) {
 
 		r.ServeHTTP(rr, req)
 
+		fmt.Printf("Requisição %d retornou status %d\n", i+1, rr.Code)
 		assert.Equal(t, http.StatusOK, rr.Code, "Request should be allowed")
 	}
 
@@ -130,6 +138,7 @@ func TestRateLimitReset(t *testing.T) {
 
 	r.ServeHTTP(rr, req)
 
+	fmt.Printf("Requisição que excede o limite retornou status %d\n", rr.Code)
 	assert.Equal(t, http.StatusTooManyRequests, rr.Code, "Request should be rate limited")
 
 	// Aguardando o reset do limite
@@ -143,12 +152,15 @@ func TestRateLimitReset(t *testing.T) {
 
 	r.ServeHTTP(rr, req)
 
+	fmt.Printf("Requisição após o reset retornou status %d\n", rr.Code)
 	assert.Equal(t, http.StatusOK, rr.Code, "Request should be allowed after reset")
 }
 
 func TestRateLimitByTokenAndIP(t *testing.T) {
-	clearRedis() // Limpar Redis antes de cada teste
-	r := setupRouter()
+	mockStorage := storage.NewMockStorage()
+	rateLimiter := ratelimiter.NewRateLimiter(mockStorage, 5, 10)
+	clearStorage(mockStorage)
+	r := setupRouter(rateLimiter)
 
 	token := "def456"
 	clientIP := "192.168.1.3"
@@ -162,6 +174,7 @@ func TestRateLimitByTokenAndIP(t *testing.T) {
 
 		r.ServeHTTP(rr, req)
 
+		fmt.Printf("Requisição %d retornou status %d\n", i+1, rr.Code)
 		assert.Equal(t, http.StatusOK, rr.Code, "Request should be allowed")
 	}
 
@@ -174,6 +187,7 @@ func TestRateLimitByTokenAndIP(t *testing.T) {
 
 	r.ServeHTTP(rr, req)
 
+	fmt.Printf("Requisição que excede o limite retornou status %d\n", rr.Code)
 	assert.Equal(t, http.StatusTooManyRequests, rr.Code, "Request should be rate limited")
 
 	// Verificando se IP ainda pode fazer requisições
@@ -185,6 +199,7 @@ func TestRateLimitByTokenAndIP(t *testing.T) {
 
 		r.ServeHTTP(rr, req)
 
+		fmt.Printf("Requisição %d retornou status %d\n", i+1, rr.Code)
 		assert.Equal(t, http.StatusOK, rr.Code, "Request should be allowed")
 	}
 }
